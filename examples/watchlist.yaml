@@ -1,0 +1,17 @@
+# YAML form (requires PyYAML). Same schema as watchlist.json.
+version: 1
+settings:
+  cooldown_minutes: 240
+  sessions: [regular]
+tickers:
+  - symbol: MSFT
+    side: long
+    thesis: Azure + Copilot monetization
+    entry: 410
+    targets: [450, 480]
+    stop: 385
+    tags: [megacap, ai]
+    alerts:
+      - {type: price_below, value: 395}
+      - {type: pct_move, value: 3}
+      - {type: earnings_within, value: 5}

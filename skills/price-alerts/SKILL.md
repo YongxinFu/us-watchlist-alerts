@@ -1,0 +1,70 @@
+---
+name: price-alerts
+description: Check a US stock watchlist for price alerts - price above/below, % daily move, gaps, 52-week highs/lows, moving-average crosses, RSI, volume spikes, stop/target hits, and upcoming earnings - with dedupe, cooldowns, NYSE market hours, pre/after-market, holidays and US/Eastern time. Use when the user asks "any alerts?", "check my watchlist", "alert me if AAPL drops below 200", or when running a scheduled/heartbeat check.
+---
+
+# Price Alerts (US markets)
+
+Evaluates alert rules from the watchlist (see `watchlist-manager`) against fresh quotes and reports **only new** alerts.
+**Not financial advice. Never place, modify or cancel orders** - even if an alert fires, even if a broker tool is connected, unless the user explicitly confirms that specific order in this conversation.
+
+## Run it
+```bash
+python scripts/alerts.py --watchlist watchlist.json --state .alert_state.json            # text output
+python scripts/alerts.py --format json                                                    # machine-readable
+python scripts/alerts.py --force-session                                                  # evaluate even when market closed
+python scripts/alerts.py --dry-run                                                        # don't update cooldown state
+python scripts/market_calendar.py                                                         # current ET session
+```
+Output: `ALERT <message>` lines, or `no new alerts`, or a "outside alert sessions" note. Data errors go to stderr as `WARN`.
+
+## Alert types
+| type | value | fires when | kind |
+|---|---|---|---|
+| `price_above` / `price_below` | price | last >= / <= value | level |
+| `stop_hit` | price (default: ticker `stop`) | long: last <= stop; short: last >= stop | level (implicit if `stop` set) |
+| `target_hit` | - | last crosses any `targets` entry | level (implicit if `targets` set) |
+| `pct_change_up` / `pct_change_down` / `pct_move` | % | change vs prior close >= value | daily |
+| `gap_up` / `gap_down` | % (default 2) | open vs prior close | daily |
+| `new_52w_high` / `new_52w_low` | - | last beyond prior 252-session range | daily |
+| `near_52w_high` / `near_52w_low` | % (default settings.near_52w_pct) | within value% of 52w extreme | daily-ish (level latch) |
+| `golden_cross` / `death_cross` | `fast`, `slow` (50/200) | SMA fast crosses slow on latest bar | daily |
+| `cross_above_ma` / `cross_below_ma` | MA length (default 50) | last close crosses its SMA | daily |
+| `rsi_above` / `rsi_below` | RSI level; optional `period` (14) | Wilder RSI on daily closes | level |
+| `volume_spike` | multiple (default 2.0) | today's volume >= value x 20-day avg | daily |
+| `earnings_within` | days (default 3) | next earnings date within N days | daily |
+
+Any rule may set `cooldown_minutes` to override `settings.cooldown_minutes`.
+
+## Anti-spam rules (implemented in `scripts/alerts.py`, state in `.alert_state.json`)
+- **Level alerts latch**: once fired they stay silent until price moves back through the level by `rearm_pct` (default 0.5%). A stock hovering at $240 never pings repeatedly.
+- **Daily-event alerts** fire at most once per trading day per ticker/type.
+- **Cooldown** (`cooldown_minutes`, default 240) applies to every re-fire.
+- **Cap** of `max_alerts_per_run` (default 20). If many fire, summarize ("7 alerts, 4 on TSLA") rather than dumping walls of text.
+- If the state file is missing or corrupt, start fresh but warn the user that duplicates are possible on this run.
+
+## Market hours (America/New_York, handled by `scripts/market_calendar.py`)
+- Pre-market 04:00-09:30, regular 09:30-16:00, after-hours 16:00-20:00 ET; early-close days (day after Thanksgiving, Christmas Eve, July 3 when a weekday) close 13:00 with after-hours to 17:00.
+- NYSE holidays: New Year's (not observed when Saturday), MLK, Presidents', Good Friday, Memorial, Juneteenth, Independence, Labor, Thanksgiving, Christmas (Sat -> Fri, Sun -> Mon). Unscheduled closures (e.g. national days of mourning) are not known - mention it if quotes look stale.
+- `settings.sessions` controls when alerts run; default `["regular"]`. Add `"pre"`/`"after"` for extended hours - note extended-hours quotes are thinner and free sources may lag.
+- Always state times in ET (add the user's local time if known, e.g. "10:05 ET / 9:05 CT").
+
+## Data sources (`scripts/quotes.py`, auto-fallback in this order)
+1. `yfinance` if installed (`pip install yfinance`) - also provides earnings dates.
+2. Yahoo public chart endpoint (no key, stdlib only).
+3. Alpaca (`ALPACA_API_KEY_ID`, `ALPACA_API_SECRET_KEY`), Finnhub (`FINNHUB_API_KEY`), Alpha Vantage (`ALPHAVANTAGE_API_KEY`).
+Force one with `--provider` or `WATCHLIST_PROVIDER`. Free data can be delayed ~15 min; say so when precision matters.
+
+**MCP option:** if an `alpaca` MCP server (alpacahq/alpaca-mcp-server) or `tradingview` MCP (atilaahmettaner/tradingview-mcp) is connected, you may use it for quotes/indicators instead of the scripts, then apply the exact same rules and anti-spam logic (read/write `.alert_state.json` in the same format). Use broker MCPs for **read-only** calls only.
+
+## Reporting format
+```
+🔔 3 new alerts (10:05 ET, regular session, data: yahoo, ~15m delayed)
+- AAPL $241.50 is above $240.00  (thesis: services margin; stop $210, T1 $250)
+- TSLA down -6.0% today, gapped down -5.0%, volume 3.0x avg
+- TSLA reports earnings in 1 day (2026-10-16)
+```
+Group by ticker, include the stored thesis/stop/target for context, no recommendations. If no alerts: one short line, or stay silent when running on a heartbeat (see `HEARTBEAT.md`).
+
+## Creating alerts from chat
+"Alert me if AAPL drops below 200" -> `python scripts/watchlist.py update AAPL --alert price_below:200 --append` (add the ticker first if missing). Confirm the rule back in plain English.

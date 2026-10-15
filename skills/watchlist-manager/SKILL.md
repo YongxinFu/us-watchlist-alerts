@@ -1,0 +1,66 @@
+---
+name: watchlist-manager
+description: Manage a US stock/ETF watchlist file - add, remove, update, list and validate tickers with thesis, entry, price targets, stop, tags, and per-ticker alert rules. Use when the user says things like "add NVDA to my watchlist", "set a stop on AAPL at 210", "what's on my watchlist", "remove TSLA", or "tag these as semis".
+---
+
+# Watchlist Manager (US markets)
+
+Maintains a single source-of-truth watchlist file that the `price-alerts` and `watchlist-brief` skills read.
+Informational tool only. **Never place, modify, or cancel a trade.** Editing the watchlist is not trading.
+
+## File location
+1. `$WATCHLIST_FILE` if set, else `./watchlist.json` in the working directory (YAML `watchlist.yaml` works if PyYAML is installed).
+2. If none exists, create it from `examples/watchlist.json` structure with an empty `tickers` list. Ask before overwriting an existing file.
+
+## Schema (version 1)
+```json
+{
+  "version": 1,
+  "settings": { "cooldown_minutes": 240, "rearm_pct": 0.5, "sessions": ["regular"],
+                "volume_spike_multiple": 2.0, "near_52w_pct": 2.0, "earnings_days": 3, "max_alerts_per_run": 20 },
+  "tickers": [{
+    "symbol": "NVDA",            // required, uppercase; class shares as BRK.B or BRK-B
+    "side": "long",              // long | short | watch
+    "added": "2026-10-15",
+    "thesis": "AI datacenter capex",
+    "entry": 160.0, "targets": [190.0, 220.0], "stop": 140.0,
+    "tags": ["ai", "semis"],
+    "alerts": [ {"type": "price_below", "value": 150, "cooldown_minutes": 60} ],
+    "notes": ""
+  }]
+}
+```
+Alert `type` values and their `value` meaning are documented in `skills/price-alerts/SKILL.md`.
+A `stop` implies a `stop_hit` alert and `targets` imply `target_hit` automatically.
+
+## Operations (prefer the script; it validates and writes atomically)
+Run from the repo root (or wherever this skill is installed; scripts live in `scripts/`):
+```bash
+python scripts/watchlist.py add NVDA --thesis "AI capex" --entry 160 --target 190 --target 220 --stop 140 --tag ai --tag semis --alert price_below:150
+python scripts/watchlist.py update NVDA --stop 145
+python scripts/watchlist.py update NVDA --tag megacap --alert rsi_above:75 --append
+python scripts/watchlist.py remove NVDA
+python scripts/watchlist.py list [--tag semis]
+python scripts/watchlist.py show NVDA
+python scripts/watchlist.py validate
+```
+If Python is unavailable, edit the JSON by hand following the schema and the validation rules below.
+
+## Workflow
+1. **Resolve the ticker.** Uppercase it. If the user gives a company name, confirm the symbol (e.g. "Alphabet" -> GOOGL or GOOG?). Reject non-US listings or say they are unsupported by default data.
+2. **Sanity-check with a live quote**: `python scripts/quotes.py NVDA`. If the user's stop is above price for a long (or target below), point it out and ask.
+3. **Capture the why.** If no thesis is given, ask once for a one-line reason; store `""` if they decline. Don't invent a thesis.
+4. **Suggest, don't impose, alerts.** Reasonable defaults to offer: stop/target levels, `earnings_within: 3`, `pct_move: 5`. Only add what the user agrees to.
+5. **Write, validate, confirm.** Show the resulting entry (symbol, entry, stop, targets, alerts) in one compact line.
+
+## Validation rules
+- Symbol matches `^[A-Z]{1,5}([.-][A-Z]{1,2})?$`; no duplicates.
+- `entry`, `stop`, `targets[]` are numbers. For `side: long`, stop < entry.
+- Every alert `type` is a known type.
+
+## Listing format
+Compact table: Ticker | Side | Entry | Stop | Targets | Tags | Thesis. Add a live price column only if the user asks or you're already fetching quotes.
+
+## Don'ts
+- Don't delete tickers without explicit instruction; for "clean up my list" propose removals first.
+- Don't give buy/sell recommendations. You may describe levels and risk (e.g. "stop is 12% below entry").
