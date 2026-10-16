@@ -3,7 +3,7 @@ version: 1
 settings:
   cooldown_minutes: 240
   sessions: [regular]
-  extra_closures: []   # ISO dates for unscheduled full-day closures
+  extra_closures: []  # e.g. [YYYY-MM-DD] for an unscheduled NYSE closure
   stale_after_seconds: 900
 tickers:
   - symbol: MSFT
@@ -17,3 +17,12 @@ tickers:
       - {type: price_below, value: 395}
       - {type: pct_move, value: 3}
       - {type: earnings_within, value: 5}
+  - symbol: TSLA
+    side: short
+    thesis: Example short position; review sizing and risk yourself
+    entry: 400
+    targets: [350]
+    stop: 440
+    tags: [example]
+    alerts:
+      - {type: price_above, value: 430}
