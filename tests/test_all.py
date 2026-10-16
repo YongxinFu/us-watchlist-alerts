@@ -1,4 +1,4 @@
-import copy, datetime as dt, io, json, os, sys, tempfile, unittest, urllib.error, warnings
+import copy, datetime as dt, importlib.util, io, json, os, sys, tempfile, unittest, urllib.error, warnings
 from unittest import mock
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "scripts"))
@@ -122,6 +122,15 @@ class Watchlist(unittest.TestCase):
         self.assertTrue(any("sessions" in e for e in wlm.validate({"settings": {"sessions": ["overnight"]}, "tickers": []})))
         self.assertTrue(any("extra_closures" in e for e in wlm.validate({"settings": {"extra_closures": ["not-a-date"]}, "tickers": []})))
         self.assertEqual(wlm.validate({"settings": {"sessions": ["regular"], "extra_closures": ["2026-01-09"]}, "tickers": []}), [])
+    @unittest.skipUnless(importlib.util.find_spec("yaml"), "PyYAML is an optional YAML extra")
+    def test_yaml_example_has_valid_short_and_extra_closure(self):
+        path = os.path.join(ROOT, "examples", "watchlist.yaml")
+        wl = wlm.load(path)
+        self.assertEqual(wlm.validate(wl), [])
+        short = next(t for t in wl["tickers"] if t["symbol"] == "TSLA")
+        self.assertEqual(short["side"], "short")
+        self.assertGreater(short["stop"], short["entry"])
+        self.assertIn("2026-11-04", [str(day) for day in wl["settings"]["extra_closures"]])
     def test_class_shares_symbol(self):
         self.assertTrue(wlm.SYMBOL_RE.match("BRK.B")); self.assertTrue(wlm.SYMBOL_RE.match("BF-B"))
     def test_cli(self):
